@@ -1,13 +1,23 @@
-# systems-monitor
-for my systems project
+# Systems-monitor
+## For my systems project
 
-installer:
+Installer:
+
     make runnable: chmod +x installer.bash
+
+To run:
+    
     run: ./setup_face_tracker.sh
 
-verify:
-    make runnable: chmod +x verify_tracker_install.bash
-    run: ./verify_tracker_install.bash
+Verify:
 
-start program:
+    chmod +x verify_tracker_install.bash
+To run
+
+    ./verify_tracker_install.bash
+
+## Start program:
+
+#### after install, and if you have already installed
+
     ~/tracker-file/start_tracker.sh
