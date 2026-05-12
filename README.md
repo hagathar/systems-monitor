@@ -3,11 +3,11 @@
 
 Installer:
 
-    make runnable: chmod +x installer.bash
+   chmod +x installer.bash
 
 To run:
     
-    run: ./setup_face_tracker.sh
+   ./setup_face_tracker.sh
 
 Verify:
 
