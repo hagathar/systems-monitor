@@ -2,7 +2,7 @@
 for my systems project
 
 installer:
-    make runnable: chmod +x installer.bash
+    make runnable: chmod +x installer.bash <\n>
     run: ./setup_face_tracker.sh
 
 verify:
