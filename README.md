@@ -4,11 +4,9 @@
 Installer:
 
    chmod +x installer.bash
-
 To run:
     
    ./setup_face_tracker.sh
-
 Verify:
 
     chmod +x verify_tracker_install.bash
