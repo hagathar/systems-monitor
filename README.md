@@ -7,7 +7,7 @@ Installer:
 ```
 To run:
 ```
-   ./setup_face_tracker.sh
+   ./installer.sh
 ```
 Verify:
 ```
