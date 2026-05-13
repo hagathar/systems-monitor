@@ -3,7 +3,7 @@
 
 Installer:
 ```
-   chmod +x installer.bash
+   chmod +x installer.bsh
 ```
 To run:
 ```
@@ -11,11 +11,11 @@ To run:
 ```
 Verify:
 ```
-    chmod +x verify_tracker_install.bash
+    chmod +x verify_tracker_install.sh
 ```
 To run:
 ```
-   ./verify_tracker_install.bash
+   ./verify_tracker_install.sh
 ```
 ## Start program:
 
