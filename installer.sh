@@ -3,8 +3,6 @@
 set -e
 
 TRACKER_DIR="$HOME/tracker-file"
-REPO_URL="https://github.com/hagathar/systems-monitor.git"
-REPO_NAME="systems-monitor"
 
 clear
 
