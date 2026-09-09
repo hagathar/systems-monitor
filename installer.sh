@@ -1,122 +1,37 @@
-#!/bin/bash
-
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 TRACKER_DIR="$HOME/tracker-file"
+REPO_NAME="systems-monitor"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$TRACKER_DIR/$REPO_NAME"
 
-clear
+echo "Pi Face Tracker installer"
+echo "Installing to: $TRACKER_DIR"
 
-echo "========================================="
-echo " Pi 5 Face Tracker Auto Installer"
-echo "========================================="
-echo ""
-
-# --------------------------------------------------
-# CHECK FOR EXISTING INSTALL
-# --------------------------------------------------
-
-if [ -d "$TRACKER_DIR" ]; then
-    echo "Existing tracker-file installation found"
-    echo "Removing old installation..."
-
-    rm -rf "$TRACKER_DIR"
-
-    echo "Old installation removed"
-    echo ""
+if ! command -v apt-get >/dev/null 2>&1; then
+    echo "This installer supports Debian/Raspberry Pi OS systems only." >&2
+    exit 1
 fi
 
-# --------------------------------------------------
-# SYSTEM UPDATE
-# --------------------------------------------------
+sudo apt-get update
+sudo apt-get install -y python3-pip python3-venv python3-opencv v4l-utils libopenblas-dev libjpeg-dev
 
-echo "Updating system..."
+mkdir -p "$PROJECT_DIR"
+cp "$SOURCE_DIR/face_tracker.py" "$SOURCE_DIR/README.md" "$SOURCE_DIR/installer.sh" "$SOURCE_DIR/verify install.bash" "$PROJECT_DIR/"
 
-sudo apt update
-sudo apt full-upgrade -y
+if [ ! -d "$TRACKER_DIR/venv" ]; then
+    python3 -m venv "$TRACKER_DIR/venv"
+fi
 
-# --------------------------------------------------
-# INSTALL DEPENDENCIES
-# --------------------------------------------------
+"$TRACKER_DIR/venv/bin/python" -m pip install --upgrade pip
+"$TRACKER_DIR/venv/bin/python" -m pip install numpy opencv-python
 
-echo "Installing dependencies..."
-
-sudo apt install -y \
-python3-pip \
-python3-venv \
-python3-opencv \
-v4l-utils \
-git \
-libopenblas-dev \
-libjpeg-dev
-
-# --------------------------------------------------
-# CREATE PROJECT FOLDER
-# --------------------------------------------------
-
-echo "Creating project directory..."
-
-mkdir -p "$TRACKER_DIR"
-cd "$TRACKER_DIR"
-
-# --------------------------------------------------
-# CREATE VIRTUAL ENVIRONMENT
-# --------------------------------------------------
-
-echo "Creating Python virtual environment..."
-
-python3 -m venv venv
-
-source venv/bin/activate
-
-# --------------------------------------------------
-# UPDATE PIP
-# --------------------------------------------------
-
-echo "Updating pip..."
-
-pip install --upgrade pip
-
-# --------------------------------------------------
-# INSTALL PYTHON PACKAGES
-# --------------------------------------------------
-
-echo "Installing Python packages..."
-
-pip install numpy opencv-python
-
-# --------------------------------------------------
-# CREATE START SCRIPT
-# --------------------------------------------------
-
-echo "Creating launcher script..."
-
-cat > start_tracker.sh << 'EOF'
-#!/bin/bash
-
-cd ~/tracker-file
-
-source venv/bin/activate
-
-python face_tracker.py
+cat > "$TRACKER_DIR/start_tracker.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+exec "$TRACKER_DIR/venv/bin/python" "$PROJECT_DIR/face_tracker.py" "\$@"
 EOF
+chmod +x "$TRACKER_DIR/start_tracker.sh"
 
-chmod +x start_tracker.sh
-
-# --------------------------------------------------
-# COMPLETE
-# --------------------------------------------------
-
-echo ""
-echo "========================================="
-echo " INSTALL COMPLETE"
-echo "========================================="
-echo ""
-echo "Tracker installed to:"
-echo "$TRACKER_DIR"
-echo ""
-echo "GitHub repo installed to:"
-echo "$TRACKER_DIR/$REPO_NAME"
-echo ""
-echo "Run tracker with:"
-echo "~/tracker-file/start_tracker.sh"
-echo ""
+echo "Install complete. Run: $TRACKER_DIR/start_tracker.sh"

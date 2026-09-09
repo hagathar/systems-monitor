@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -u
 
 TRACKER_DIR="$HOME/tracker-file"
 
@@ -28,13 +30,14 @@ if [ -d "$TRACKER_DIR/venv" ]; then
     echo "[PASS] Python virtual environment exists"
 else
     echo "[FAIL] venv missing"
+    exit 1
 fi
 
 # ----------------------------------------
 # CHECK FACE TRACKER
 # ----------------------------------------
 
-if [ -f "$TRACKER_DIR/face_tracker.py" ]; then
+if [ -f "$TRACKER_DIR/systems-monitor/face_tracker.py" ]; then
     echo "[PASS] face_tracker.py exists"
 else
     echo "[FAIL] face_tracker.py missing"
@@ -75,9 +78,7 @@ fi
 # CHECK OPENCV
 # ----------------------------------------
 
-source "$TRACKER_DIR/venv/bin/activate"
-
-python - <<EOF
+"$TRACKER_DIR/venv/bin/python" - <<EOF
 try:
     import cv2
     print("[PASS] OpenCV installed")
@@ -93,13 +94,17 @@ EOF
 echo ""
 echo "Checking camera devices..."
 
-v4l2-ctl --list-devices
+if command -v v4l2-ctl >/dev/null 2>&1; then
+    v4l2-ctl --list-devices
+else
+    echo "[FAIL] v4l2-ctl missing"
+fi
 
 # ----------------------------------------
 # TEST CAMERA ACCESS
 # ----------------------------------------
 
-python - <<EOF
+"$TRACKER_DIR/venv/bin/python" - <<EOF
 import cv2
 
 cap = cv2.VideoCapture(0)
