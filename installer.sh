@@ -18,14 +18,14 @@ sudo apt-get update
 sudo apt-get install -y python3-pip python3-venv python3-opencv v4l-utils libopenblas-dev libjpeg-dev
 
 mkdir -p "$PROJECT_DIR"
-cp "$SOURCE_DIR/face_tracker.py" "$SOURCE_DIR/README.md" "$SOURCE_DIR/installer.sh" "$SOURCE_DIR/verify install.bash" "$PROJECT_DIR/"
+cp "$SOURCE_DIR/face_tracker.py" "$SOURCE_DIR/README.md" "$SOURCE_DIR/requirements.txt" "$SOURCE_DIR/installer.sh" "$SOURCE_DIR/verify install.bash" "$PROJECT_DIR/"
 
 if [ ! -d "$TRACKER_DIR/venv" ]; then
     python3 -m venv "$TRACKER_DIR/venv"
 fi
 
 "$TRACKER_DIR/venv/bin/python" -m pip install --upgrade pip
-"$TRACKER_DIR/venv/bin/python" -m pip install numpy opencv-python
+"$TRACKER_DIR/venv/bin/python" -m pip install --upgrade --force-reinstall --no-cache-dir -r "$PROJECT_DIR/requirements.txt"
 
 cat > "$TRACKER_DIR/start_tracker.sh" <<EOF
 #!/usr/bin/env bash

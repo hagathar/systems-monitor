@@ -1,0 +1,4 @@
+# OpenCV wheels before 4.12 were built against the NumPy 1.x C API.
+# Keep this pair together on Raspberry Pi OS to avoid the NumPy 2 ABI error.
+numpy==1.26.4
+opencv-python==4.10.0.84

@@ -44,7 +44,7 @@ sudo apt-get install -y python3-pip python3-venv python3-opencv v4l-utils libope
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install numpy opencv-python
+pip install -r requirements.txt
 python face_tracker.py
 ```
 
@@ -52,6 +52,19 @@ The tracker needs a webcam exposed as `/dev/video0` and opens a graphical
 preview window. Run it from the Pi desktop, or use an SSH session configured
 for graphical forwarding; a plain headless SSH session cannot display the
 preview.
+
+### NumPy/OpenCV compatibility repair
+
+If importing `cv2` reports that a module compiled against NumPy 1.x cannot run
+with NumPy 2.x, install the version pair pinned by this project. From the
+cloned repository, run:
+
+```bash
+~/tracker-file/venv/bin/python -m pip install --upgrade --force-reinstall --no-cache-dir -r requirements.txt
+```
+
+Then start the tracker again. The installer runs the same command, so rerunning
+`./installer.sh` also repairs an existing installation.
 
 ## Run
 
