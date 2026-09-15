@@ -2,3 +2,4 @@
 # Keep this pair together on Raspberry Pi OS to avoid the NumPy 2 ABI error.
 numpy==1.26.4
 opencv-python==4.10.0.84
+smbus2==0.5.0

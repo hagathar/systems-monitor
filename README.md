@@ -32,6 +32,32 @@ The installer keeps existing files in `~/tracker-file`, copies this project to
 `~/tracker-file/systems-monitor`, and creates `~/tracker-file/start_tracker.sh`.
 It requires a Debian/Raspberry Pi OS system because it uses `apt-get`.
 
+## AS5600 angle-sensor test
+
+The test supports the three AS5600 sensors connected to a **PCA9548A** I2C multiplexer. (The part written as “PCA95448A” in the wiring list appears to be the PCA9548A.) Its wiring assumes the mux is at `0x70` because A0 and A1 are grounded, and that one AS5600 is connected to each of mux channels 0, 1, and 2. All AS5600 sensors use their default address, `0x36`; placing each one on a separate mux channel is therefore required.
+
+Enable I2C first on the Pi:
+
+```bash
+sudo raspi-config
+# Interface Options -> I2C -> Enable, then reboot if prompted
+```
+
+Run the updater after pulling this repository version. It installs `i2c-tools` and the Python `smbus2` dependency, copies the test into the installed project, and creates its launcher:
+
+```bash
+./update.sh
+~/tracker-file/test_as5600.sh --count 0
+```
+
+The default one-shot test reads channels 0, 1, and 2. To test different mux ports, provide their comma-separated channel numbers:
+
+```bash
+~/tracker-file/test_as5600.sh --channels 2,4,6 --count 10 --interval 0.25
+```
+
+Each result reports the raw 12-bit position, angle in degrees, and whether the magnet field is valid, too weak, too strong, or absent.
+
 ### Manual installation
 
 If you prefer not to use the installer, run these commands after cloning the
