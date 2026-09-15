@@ -47,16 +47,16 @@ Run the updater after pulling this repository version. It installs `i2c-tools` a
 
 ```bash
 ./update.sh
-~/tracker-file/test_as5600.sh --count 0
+~/tracker-file/test_as5600.sh
 ```
 
-The default one-shot test reads channels 0, 1, and 2. To test different mux ports, provide their comma-separated channel numbers:
+By default, the test reads channels 0, 1, and 2 continuously and prints every sensor's position in degrees and raw 12-bit value every two seconds. Press Ctrl-C to stop. Use `--interval` to change the interval or `--count` for a finite test. To test different mux ports, provide their comma-separated channel numbers:
 
 ```bash
 ~/tracker-file/test_as5600.sh --channels 2,4,6 --count 10 --interval 0.25
 ```
 
-Each result reports the raw 12-bit position, angle in degrees, and whether the magnet field is valid, too weak, too strong, or absent.
+Each result also reports whether the magnet field is valid, too weak, too strong, or absent.
 
 ### Manual installation
 

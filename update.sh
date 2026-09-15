@@ -42,4 +42,4 @@ EOF
 chmod +x "$TRACKER_DIR/start_tracker.sh" "$TRACKER_DIR/test_as5600.sh"
 echo "Update complete."
 echo "Face tracker: $TRACKER_DIR/start_tracker.sh"
-echo "AS5600 test:  $TRACKER_DIR/test_as5600.sh --count 0"
+echo "AS5600 test:  $TRACKER_DIR/test_as5600.sh"

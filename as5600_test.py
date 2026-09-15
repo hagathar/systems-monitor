@@ -4,6 +4,7 @@
 import argparse
 import sys
 import time
+from datetime import datetime
 
 AS5600_DEFAULT_ADDRESS = 0x36
 AS5600_STATUS_REGISTER = 0x0B
@@ -41,8 +42,8 @@ def parse_args():
     parser.add_argument("--mux-address", type=parse_i2c_address, default=PCA9548A_DEFAULT_ADDRESS, help="PCA9548A I2C address (default: 0x70)")
     parser.add_argument("--sensor-address", type=parse_i2c_address, default=AS5600_DEFAULT_ADDRESS, help="AS5600 I2C address (default: 0x36)")
     parser.add_argument("--channels", type=parse_channels, default=[0, 1, 2], help="PCA9548A channels holding sensors (default: 0,1,2)")
-    parser.add_argument("--interval", type=float, default=0.5, help="Seconds between samples (default: 0.5)")
-    parser.add_argument("--count", type=int, default=1, help="Samples to take; 0 runs continuously")
+    parser.add_argument("--interval", type=float, default=2.0, help="Seconds between samples (default: 2.0)")
+    parser.add_argument("--count", type=int, default=0, help="Samples to take; 0 runs continuously")
     return parser.parse_args()
 
 
@@ -85,12 +86,12 @@ def main():
         with SMBus(args.bus) as bus:
             while args.count == 0 or sample < args.count:
                 sample += 1
-                print(f"\nSample {sample}")
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Sample {sample}")
                 for channel in args.channels:
                     try:
                         select_channel(bus, args.mux_address, channel)
                         raw_angle, degrees, magnet_status = read_sensor(bus, args.sensor_address)
-                        print(f"  channel {channel}: {degrees:7.2f} degrees (raw {raw_angle:4d}/4095, {magnet_status})")
+                        print(f"  channel {channel}: position={degrees:7.2f} degrees  value={raw_angle:4d}/4095  {magnet_status}")
                     except OSError as error:
                         print(f"  channel {channel}: ERROR - {error}")
                 if args.count == 0 or sample < args.count:
