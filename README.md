@@ -58,6 +58,52 @@ By default, the test reads channels 0, 1, and 2 continuously and prints every se
 
 Each result also reports whether the magnet field is valid, too weak, too strong, or absent.
 
+## Monitor face-aim controller
+
+`monitor_aim.py` runs a startup diagnostic for the camera, all configured AS5600
+channels, and the TB6612 GPIO setup. It then opens a face preview with a green
+crosshair for the face target and a cyan crosshair for the **estimated** monitor
+aim. The terminal reports the face location, estimated aim, and encoder values
+every two seconds. Press Esc, Q, or X to stop; the program de-energises the
+TB6612 in all exit paths.
+
+```bash
+./update.sh
+~/tracker-file/aim_monitor.sh --test-only
+~/tracker-file/aim_monitor.sh --mirror
+```
+
+The controller is dry-run by default: it never opens motor GPIOs or energises a
+motor. This lets you verify the camera and all three encoders first.
+
+### Important motor-driver constraint
+
+The supplied TB6612FNG mapping provides two H-bridges. Motor A (PWMA/AIN1/AIN2)
+is used for the Y linear actuator. A normal bipolar stepper needs **both**
+H-bridges, so this mapping cannot also drive the Y actuator and a four-wire
+stepper independently. The two-wire Motor B wiring can only be used as a
+reversible DC/geared X rotator:
+
+```bash
+# Only after confirming the actuator's physical end limits work.
+~/tracker-file/aim_monitor.sh --mirror --enable-motion --confirm-y-limits --x-mode tb6612-dc
+```
+
+For a real X stepper, use a separate STEP/DIR driver (such as an A4988/DRV8825)
+and give its **new, unused** GPIO pins plus a calibrated step count. Do not
+reuse any TB6612 pins:
+
+```bash
+~/tracker-file/aim_monitor.sh --mirror --enable-motion --confirm-y-limits \
+  --x-mode external-step-dir --step-pin 23 --direction-pin 24 --steps-per-screen 3200
+```
+
+The program refuses all movement without `--enable-motion` and
+`--confirm-y-limits`, limits TB6612 duty cycle to 35%, and sends short 120 ms
+pulses. Those protections are necessary because no external limit-switch pins
+or encoder-to-travel calibration were supplied. The monitor-aim crosshair is
+therefore explicitly labelled *estimated* until those calibrations are added.
+
 ### Manual installation
 
 If you prefer not to use the installer, run these commands after cloning the
