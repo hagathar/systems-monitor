@@ -43,6 +43,12 @@ else
     echo "[FAIL] face_tracker.py missing"
 fi
 
+if [ -f "$TRACKER_DIR/systems-monitor/monitor_aim.py" ] && [ -f "$TRACKER_DIR/systems-monitor/as5600_test.py" ]; then
+    echo "[PASS] monitor-aim and AS5600 programs exist"
+else
+    echo "[FAIL] monitor-aim or AS5600 program missing"
+fi
+
 # ----------------------------------------
 # CHECK START SCRIPT
 # ----------------------------------------
@@ -88,6 +94,19 @@ except:
 EOF
 
 # ----------------------------------------
+# CHECK MOTOR / I2C PYTHON DEPENDENCIES
+# ----------------------------------------
+
+"$TRACKER_DIR/venv/bin/python" - <<EOF
+try:
+    import gpiozero
+    import smbus2
+    print("[PASS] GPIO and I2C Python dependencies installed")
+except Exception as error:
+    print("[FAIL] GPIO or I2C dependency missing:", error)
+EOF
+
+# ----------------------------------------
 # CHECK CAMERA
 # ----------------------------------------
 
@@ -116,6 +135,14 @@ else:
 
 cap.release()
 EOF
+
+# ----------------------------------------
+# SAFE MONITOR-AIM DIAGNOSTIC
+# ----------------------------------------
+
+echo ""
+echo "Running non-moving monitor-aim diagnostic..."
+"$TRACKER_DIR/venv/bin/python" "$TRACKER_DIR/systems-monitor/monitor_aim.py" --test-only || true
 
 # ----------------------------------------
 # COMPLETE

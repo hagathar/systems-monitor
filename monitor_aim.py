@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely aim a monitor at a detected face using the supplied Raspberry Pi wiring."""
+"""Diagnose and safely aim a monitor at a detected face on Raspberry Pi."""
 
 import argparse
 import sys
@@ -17,20 +17,29 @@ from as5600_test import (
 )
 
 
-# TB6612FNG wiring from the supplied pin map. Motor A is reserved for the Y actuator.
+# Revised, non-conflicting pin maps supplied for the two motor drivers.
+# L298N ENA/ENB jumpers are installed, so both channels run at full supply voltage.
+L298N_PINS = {"in1": 24, "in2": 22, "in3": 23, "in4": 25}
 TB6612_PINS = {
     "pwma": 20,
-    "ain2": 27,
-    "ain1": 17,
+    "ain1": 5,
+    "ain2": 17,
     "stby": 14,
-    "bin1": 22,
+    "bin1": 27,
     "bin2": 16,
     "pwmb": 18,
 }
-MAX_DUTY = 0.35
-MAX_PULSE_SECONDS = 0.12
+
+Y_PULSE_SECONDS = 0.06
 CONTROL_PERIOD_SECONDS = 0.18
 DEAD_ZONE_PIXELS = 24
+MAX_STEPS_PER_CONTROL = 8
+
+
+def validate_pin_maps():
+    overlap = set(L298N_PINS.values()) & set(TB6612_PINS.values())
+    if overlap:
+        raise RuntimeError(f"L298N and TB6612 GPIO maps overlap: {sorted(overlap)}")
 
 
 def parse_channels(value):
@@ -43,6 +52,10 @@ def parse_channels(value):
     return channels
 
 
+def clamp(value, lower, upper):
+    return max(lower, min(value, upper))
+
+
 def draw_crosshair(cv2, frame, point, color, label):
     x, y = map(int, point)
     cv2.line(frame, (x - 16, y), (x + 16, y), color, 2)
@@ -51,96 +64,113 @@ def draw_crosshair(cv2, frame, point, color, label):
     cv2.putText(frame, label, (x + 20, y - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
 
-def clamp(value, lower, upper):
-    return max(lower, min(value, upper))
+class L298NActuators:
+    """Two parallel Y-axis linear actuators driven by an L298N with EN jumpers."""
 
+    def __init__(self):
+        from gpiozero import OutputDevice
 
-def duty_for_error(error):
-    return clamp(0.12 + abs(error) / 900, 0.12, MAX_DUTY)
-
-
-class Tb6612Channel:
-    """One TB6612FNG H-bridge channel, always created in its stopped state."""
-
-    def __init__(self, in1, in2, pwm):
-        self.in1 = in1
-        self.in2 = in2
-        self.pwm = pwm
+        self.in1 = OutputDevice(L298N_PINS["in1"], initial_value=False)
+        self.in2 = OutputDevice(L298N_PINS["in2"], initial_value=False)
+        self.in3 = OutputDevice(L298N_PINS["in3"], initial_value=False)
+        self.in4 = OutputDevice(L298N_PINS["in4"], initial_value=False)
         self.stop()
 
-    def drive(self, direction, duty):
-        self.in1.value = direction > 0
-        self.in2.value = direction < 0
-        self.pwm.value = clamp(duty, 0, MAX_DUTY)
+    def drive_y(self, direction):
+        """Move both actuators together; direction is intentionally a short, full-power pulse."""
+        forward = direction > 0
+        self.in1.value = forward
+        self.in2.value = not forward
+        self.in3.value = forward
+        self.in4.value = not forward
 
     def stop(self):
-        self.pwm.value = 0
         self.in1.off()
         self.in2.off()
+        self.in3.off()
+        self.in4.off()
 
     def close(self):
         self.stop()
         self.in1.close()
         self.in2.close()
+        self.in3.close()
+        self.in4.close()
+
+
+class Tb6612Coil:
+    """One TB6612 H-bridge channel used as one coil of a bipolar stepper."""
+
+    def __init__(self, in1, in2, pwm):
+        self.in1 = in1
+        self.in2 = in2
+        self.pwm = pwm
+        self.release()
+
+    def energize(self, polarity):
+        self.in1.value = polarity > 0
+        self.in2.value = polarity < 0
+        self.pwm.value = 1
+
+    def release(self):
+        self.pwm.value = 0
+        self.in1.off()
+        self.in2.off()
+
+    def close(self):
+        self.release()
+        self.in1.close()
+        self.in2.close()
         self.pwm.close()
 
 
-class Tb6612Driver:
-    """TB6612FNG driver. Channel A is Y; Channel B is only for a two-wire DC rotator."""
+class Tb6612Stepper:
+    """Four-wire bipolar stepper using both TB6612FNG H-bridges."""
 
-    def __init__(self):
+    # Full-step sequence: (coil A polarity, coil B polarity).
+    SEQUENCE = ((1, 1), (-1, 1), (-1, -1), (1, -1))
+
+    def __init__(self, pulse_seconds):
         from gpiozero import OutputDevice, PWMOutputDevice
 
         self.stby = OutputDevice(TB6612_PINS["stby"], initial_value=False)
-        self.y = Tb6612Channel(
+        self.coil_a = Tb6612Coil(
             OutputDevice(TB6612_PINS["ain1"], initial_value=False),
             OutputDevice(TB6612_PINS["ain2"], initial_value=False),
             PWMOutputDevice(TB6612_PINS["pwma"], frequency=1_000, initial_value=0),
         )
-        self.x_dc = Tb6612Channel(
+        self.coil_b = Tb6612Coil(
             OutputDevice(TB6612_PINS["bin1"], initial_value=False),
             OutputDevice(TB6612_PINS["bin2"], initial_value=False),
             PWMOutputDevice(TB6612_PINS["pwmb"], frequency=1_000, initial_value=0),
         )
-        self.stop_all()
+        self.pulse_seconds = pulse_seconds
+        self.index = 0
+        self.release()
 
-    def enable(self):
+    def move(self, direction, steps):
         self.stby.on()
+        try:
+            for _ in range(steps):
+                self.index = (self.index + (1 if direction > 0 else -1)) % len(self.SEQUENCE)
+                coil_a, coil_b = self.SEQUENCE[self.index]
+                self.coil_a.energize(coil_a)
+                self.coil_b.energize(coil_b)
+                time.sleep(self.pulse_seconds)
+        finally:
+            # Do not leave the stepper coils energised and heating between pulses.
+            self.release()
 
-    def stop_all(self):
-        self.y.stop()
-        self.x_dc.stop()
+    def release(self):
+        self.coil_a.release()
+        self.coil_b.release()
         self.stby.off()
 
     def close(self):
-        self.stop_all()
-        self.y.close()
-        self.x_dc.close()
+        self.release()
+        self.coil_a.close()
+        self.coil_b.close()
         self.stby.close()
-
-
-class StepDirDriver:
-    """Optional external STEP/DIR stepper driver; its GPIOs are not in the supplied map."""
-
-    def __init__(self, step_pin, direction_pin, pulse_seconds):
-        from gpiozero import OutputDevice
-
-        self.step = OutputDevice(step_pin, initial_value=False)
-        self.direction = OutputDevice(direction_pin, initial_value=False)
-        self.pulse_seconds = pulse_seconds
-
-    def move(self, direction, steps):
-        self.direction.value = direction > 0
-        for _ in range(steps):
-            self.step.on()
-            time.sleep(self.pulse_seconds)
-            self.step.off()
-            time.sleep(self.pulse_seconds)
-
-    def close(self):
-        self.step.off()
-        self.step.close()
-        self.direction.close()
 
 
 @dataclass
@@ -152,7 +182,6 @@ class EncoderReading:
 
 
 def read_encoders(bus_number, mux_address, sensor_address, channels):
-    """Read each AS5600 independently through the PCA9548A."""
     try:
         from smbus2 import SMBus
     except ImportError:
@@ -175,15 +204,15 @@ def read_encoders(bus_number, mux_address, sensor_address, channels):
 
 
 def print_diagnostic(name, passed, detail):
-    state = "PASS" if passed else "FAIL"
-    print(f"[{state}] {name}: {detail}")
+    print(f"[{'PASS' if passed else 'FAIL'}] {name}: {detail}")
 
 
 def run_diagnostics(args):
-    """Check software, camera, encoder readings, and safe GPIO initialization without movement."""
+    """Run non-moving checks first: camera, encoders, and motor outputs held low."""
     print("=== Monitor aim startup diagnostic ===")
-    print("Pin map: Y actuator=TB6612 Motor A; TB6612 standby=GPIO 14; I2C=GPIO 2/3.")
-    print("Motor electrical movement is deliberately not part of the automatic test.")
+    print("L298N: Y actuators on GPIO 24/22 and GPIO 23/25; ENA/ENB jumpers installed.")
+    print("TB6612: X bipolar stepper coils on GPIO 5/17 and GPIO 27/16.")
+    print("Automatic diagnostics never command motor movement.")
 
     try:
         import cv2
@@ -197,8 +226,7 @@ def run_diagnostics(args):
     except ImportError:
         print_diagnostic("camera", False, "OpenCV unavailable")
 
-    readings = read_encoders(args.i2c_bus, args.mux_address, args.sensor_address, args.sensor_channels)
-    for reading in readings:
+    for reading in read_encoders(args.i2c_bus, args.mux_address, args.sensor_address, args.sensor_channels):
         if reading.degrees is None:
             print_diagnostic(f"AS5600 channel {reading.channel}", False, reading.status)
         else:
@@ -210,13 +238,15 @@ def run_diagnostics(args):
 
     if args.enable_motion:
         try:
-            driver = Tb6612Driver()
-            driver.close()
-            print_diagnostic("TB6612 GPIO", True, "all outputs initialized low; STBY remains low")
+            actuators = L298NActuators()
+            stepper = Tb6612Stepper(args.step_pulse_ms / 1000)
+            actuators.close()
+            stepper.close()
+            print_diagnostic("L298N and TB6612 GPIO", True, "all outputs initialized low; TB6612 STBY low")
         except Exception as error:
-            print_diagnostic("TB6612 GPIO", False, str(error))
+            print_diagnostic("L298N and TB6612 GPIO", False, str(error))
     else:
-        print_diagnostic("TB6612 GPIO", True, "dry-run: no GPIO output opened")
+        print_diagnostic("motor GPIO", True, "dry-run: no motor GPIO output opened")
 
 
 def parse_args():
@@ -229,38 +259,28 @@ def parse_args():
     parser.add_argument("--sensor-channels", type=parse_channels, default=[0, 1, 2])
     parser.add_argument("--test-only", action="store_true", help="Run diagnostics without opening the preview")
     parser.add_argument("--enable-motion", action="store_true", help="Allow motor commands after the diagnostic")
-    parser.add_argument(
-        "--confirm-y-limits",
-        action="store_true",
-        help="Confirm that the Y actuator has tested physical end limits before allowing motion",
-    )
-    parser.add_argument(
-        "--x-mode",
-        choices=("disabled", "tb6612-dc", "external-step-dir"),
-        default="disabled",
-        help="X drive type; a standard stepper requires external-step-dir",
-    )
-    parser.add_argument("--step-pin", type=int, help="STEP GPIO for an external stepper driver")
-    parser.add_argument("--direction-pin", type=int, help="DIR GPIO for an external stepper driver")
-    parser.add_argument("--step-pulse-ms", type=float, default=2.0, help="External STEP pulse half-period in ms")
-    parser.add_argument("--steps-per-screen", type=float, help="Calibrated external-stepper steps for full screen width")
+    parser.add_argument("--confirm-y-limits", action="store_true", help="Confirm tested physical end limits for both Y actuators")
+    parser.add_argument("--invert-y", action="store_true", help="Reverse both Y actuator directions")
+    parser.add_argument("--invert-x", action="store_true", help="Reverse X stepper direction")
+    parser.add_argument("--x-mode", choices=("disabled", "tb6612-stepper"), default="tb6612-stepper")
+    parser.add_argument("--step-pulse-ms", type=float, default=4.0, help="Stepper coil dwell per full step in ms (default: 4)")
+    parser.add_argument("--steps-per-screen", type=float, help="Calibrated X full-steps for one screen width")
     return parser.parse_args()
 
 
 def validate_motion_args(args):
-    if not args.enable_motion:
+    validate_pin_maps()
+    if args.step_pulse_ms <= 0:
+        raise SystemExit("--step-pulse-ms must be greater than zero")
+    if args.test_only or not args.enable_motion:
         return
     if not args.confirm_y_limits:
-        raise SystemExit("Refusing motion: pass --confirm-y-limits only after verifying physical Y end limits.")
-    if args.x_mode == "external-step-dir":
-        if args.step_pin is None or args.direction_pin is None or not args.steps_per_screen:
-            raise SystemExit("external-step-dir requires --step-pin, --direction-pin, and --steps-per-screen.")
-        if args.step_pin == args.direction_pin or args.step_pin in TB6612_PINS.values() or args.direction_pin in TB6612_PINS.values():
-            raise SystemExit("External stepper pins must be unique and cannot reuse a TB6612 pin.")
+        raise SystemExit("Refusing motion: pass --confirm-y-limits only after checking the Y actuators' physical limits.")
+    if args.x_mode == "tb6612-stepper" and (not args.steps_per_screen or args.steps_per_screen <= 0):
+        raise SystemExit("TB6612 stepper motion requires a calibrated --steps-per-screen value.")
 
 
-def detect_face(cascade, frame, previous):
-    gray = frame
+def detect_face(cascade, gray, previous):
     faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
     if not len(faces):
         return None, None
@@ -284,19 +304,14 @@ def run_preview(args):
     if not cap.isOpened():
         raise SystemExit(f"Could not open camera {args.camera}")
 
-    driver = None
-    stepper = None
+    actuators = stepper = None
     if args.enable_motion:
-        driver = Tb6612Driver()
-        driver.enable()
-        if args.x_mode == "external-step-dir":
-            stepper = StepDirDriver(args.step_pin, args.direction_pin, args.step_pulse_ms / 1000)
+        actuators = L298NActuators()
+        stepper = Tb6612Stepper(args.step_pulse_ms / 1000)
 
-    monitor_aim = None
-    previous_face = None
-    path = deque(maxlen=40)
-    y_stop_at = x_stop_at = 0.0
-    last_control = last_report = 0.0
+    monitor_aim = previous_face = None
+    face_path = deque(maxlen=40)
+    y_stop_at = last_control = last_report = 0.0
 
     try:
         while True:
@@ -310,44 +325,45 @@ def run_preview(args):
                 monitor_aim = [width / 2, height / 2]
 
             now = time.monotonic()
-            if driver and now >= y_stop_at:
-                driver.y.stop()
-            if driver and now >= x_stop_at:
-                driver.x_dc.stop()
+            if actuators and now >= y_stop_at:
+                actuators.stop()
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             target, face_box = detect_face(cascade, gray, previous_face)
             if target:
                 previous_face = target
-                path.append(target)
+                face_path.append(target)
                 x, y, box_width, box_height = face_box
                 cv2.rectangle(frame, (x, y), (x + box_width, y + box_height), (0, 255, 0), 2)
+
                 if now - last_control >= CONTROL_PERIOD_SECONDS:
                     last_control = now
                     x_error = target[0] - monitor_aim[0]
                     y_error = target[1] - monitor_aim[1]
                     if abs(y_error) > DEAD_ZONE_PIXELS:
                         direction = 1 if y_error > 0 else -1
+                        if args.invert_y:
+                            direction *= -1
                         monitor_aim[1] += clamp(y_error, -12, 12)
-                        if driver:
-                            driver.y.drive(direction, duty_for_error(y_error))
-                            y_stop_at = now + MAX_PULSE_SECONDS
-                    if abs(x_error) > DEAD_ZONE_PIXELS:
-                        direction = 1 if x_error > 0 else -1
-                        if args.x_mode == "external-step-dir" and stepper:
-                            steps = max(1, min(8, round(abs(x_error) / width * args.steps_per_screen / 8)))
+                        if actuators:
+                            actuators.drive_y(direction)
+                            y_stop_at = now + Y_PULSE_SECONDS
+                    if abs(x_error) > DEAD_ZONE_PIXELS and args.x_mode == "tb6612-stepper":
+                        if stepper:
+                            steps = max(1, min(MAX_STEPS_PER_CONTROL, round(abs(x_error) / width * args.steps_per_screen / 8)))
+                            direction = 1 if x_error > 0 else -1
+                            if args.invert_x:
+                                direction *= -1
                             stepper.move(direction, steps)
                             monitor_aim[0] += direction * steps / args.steps_per_screen * width
-                        elif args.x_mode == "tb6612-dc":
+                        else:
+                            # Dry-run visualisation only; real motion requires calibrated steps-per-screen.
                             monitor_aim[0] += clamp(x_error, -12, 12)
-                            if driver:
-                                driver.x_dc.drive(direction, duty_for_error(x_error))
-                                x_stop_at = now + MAX_PULSE_SECONDS
             else:
                 previous_face = None
 
-            if len(path) > 1:
-                cv2.polylines(frame, [np.array(path)], False, (0, 140, 0), 2)
+            if len(face_path) > 1:
+                cv2.polylines(frame, [np.array(face_path, dtype=np.int32)], False, (0, 140, 0), 2)
             if target:
                 draw_crosshair(cv2, frame, target, (0, 255, 0), "FACE TARGET")
             draw_crosshair(cv2, frame, monitor_aim, (255, 255, 0), "ESTIMATED MONITOR AIM")
@@ -355,8 +371,9 @@ def run_preview(args):
                 cv2.line(frame, tuple(map(int, monitor_aim)), target, (255, 0, 255), 1)
 
             mode = "MOTION ENABLED" if args.enable_motion else "DRY RUN - NO MOTOR OUTPUT"
-            cv2.putText(frame, mode, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255) if args.enable_motion else (0, 255, 255), 2)
-            cv2.putText(frame, f"X mode: {args.x_mode} | Esc or X: emergency stop", (16, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+            color = (0, 0, 255) if args.enable_motion else (0, 255, 255)
+            cv2.putText(frame, mode, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+            cv2.putText(frame, f"X: {args.x_mode} | Y: L298N dual actuator | Esc/Q/X: stop", (16, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
             if now - last_report >= 2.0:
                 last_report = now
@@ -369,12 +386,11 @@ def run_preview(args):
                 print(f"{face_text}; estimated_aim=({monitor_aim[0]:.0f}, {monitor_aim[1]:.0f}); {encoder_text}")
 
             cv2.imshow("Monitor Face Aim", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key in (27, ord("q"), ord("x")):
+            if cv2.waitKey(1) & 0xFF in (27, ord("q"), ord("x")):
                 break
     finally:
-        if driver:
-            driver.close()
+        if actuators:
+            actuators.close()
         if stepper:
             stepper.close()
         cap.release()
