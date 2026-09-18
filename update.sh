@@ -5,6 +5,23 @@ TRACKER_DIR="$HOME/tracker-file"
 REPO_NAME="systems-monitor"
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$TRACKER_DIR/$REPO_NAME"
+INSTALL_LITE_PREVIEW=false
+
+case "$#" in
+    0) ;;
+    1)
+        if [ "$1" = "--lite-preview" ]; then
+            INSTALL_LITE_PREVIEW=true
+        else
+            echo "Usage: $0 [--lite-preview]" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        echo "Usage: $0 [--lite-preview]" >&2
+        exit 2
+        ;;
+esac
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This updater supports Debian/Raspberry Pi OS systems only." >&2
@@ -14,6 +31,11 @@ fi
 echo "Updating Pi Face Tracker, AS5600 test, and monitor-aim controller dependencies..."
 sudo apt-get update
 sudo apt-get install -y python3-pip python3-venv python3-opencv python3-lgpio v4l-utils i2c-tools libopenblas-dev libjpeg-dev
+
+if [ "$INSTALL_LITE_PREVIEW" = true ]; then
+    echo "Installing the local Wayland desktop required for the OpenCV preview..."
+    sudo apt-get install -y rpd-wayland-core rpd-theme rpd-preferences rpd-applications rpd-utilities rpd-developer rpd-graphics
+fi
 
 mkdir -p "$PROJECT_DIR"
 if [ "$SOURCE_DIR" != "$PROJECT_DIR" ]; then
@@ -50,3 +72,6 @@ echo "Update complete."
 echo "Face tracker: $TRACKER_DIR/start_tracker.sh"
 echo "AS5600 test:  $TRACKER_DIR/test_as5600.sh"
 echo "Monitor aim:   $TRACKER_DIR/aim_monitor.sh --test-only"
+if [ "$INSTALL_LITE_PREVIEW" = true ]; then
+    echo "A reboot is required before opening the local preview window."
+fi

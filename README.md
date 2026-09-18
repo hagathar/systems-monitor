@@ -76,6 +76,30 @@ Press Esc, Q, or X to stop; all motor outputs are disabled in every exit path.
 The controller is dry-run by default: it never opens motor GPIOs or energises a
 motor. This lets you verify the camera and all three encoders first.
 
+### Local preview on Raspberry Pi OS Lite
+
+Pi OS Lite has no graphical desktop, so the OpenCV crosshair window cannot run
+from its normal console alone. To use the HDMI-connected Pi monitor locally,
+install the required Wayland desktop packages without remote-access extras,
+then reboot:
+
+```bash
+cd ~/systems-monitor
+git pull origin main
+./update.sh --lite-preview
+sudo reboot
+```
+
+After rebooting into the local desktop, open a terminal on the Pi and run:
+
+```bash
+~/tracker-file/aim_monitor.sh --mirror
+```
+
+The program prints a clear setup message rather than attempting to open a
+preview from a non-graphical console. `--test-only` and the AS5600 terminal
+test remain usable without a desktop.
+
 ### Revised motor wiring
 
 The L298N now drives the two Y-axis linear actuators synchronously, one on each

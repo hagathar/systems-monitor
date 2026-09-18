@@ -2,6 +2,7 @@
 """Diagnose and safely aim a monitor at a detected face on Raspberry Pi."""
 
 import argparse
+import os
 import sys
 import time
 from collections import deque
@@ -296,6 +297,12 @@ def detect_face(cascade, gray, previous):
 
 def run_preview(args):
     import cv2
+
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        raise SystemExit(
+            "No graphical session is available for the preview. On Pi OS Lite, run "
+            "./update.sh --lite-preview, reboot, then launch this from the local desktop."
+        )
 
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     if cascade.empty():
